@@ -1,7 +1,8 @@
-import cv2
-import mediapipe as mp
 import random
 import time
+
+import cv2
+import mediapipe as mp
 
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
@@ -12,7 +13,7 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
 score = 0
-box_size = 120
+box_size = 20
 current_target = None
 
 
@@ -73,4 +74,5 @@ cv2.destroyAllWindows()
 # Add a timer, and then check for timer beats/ticks for when to add squares
 # Make a method for adding squares, check at every loop if we've reached a certain point in the song
 # 
+
 
