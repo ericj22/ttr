@@ -4,12 +4,23 @@ import sys
 import cv2
 import mediapipe as mp
 import pygame
+import json
+import sys
+
+beat_file = sys.argv[1]
+
+if not beat_file:
+    print("Invalid beatmap file")
+    exit()
+
+with open(beat_file, "r") as file:
+    song_info = json.load(file)
 
 # Pygame setup
 pygame.init()
 WIDTH, HEIGHT = 640, 480
 pygame.mixer.init()
-pygame.mixer.music.load("soda-pop.mp3")
+pygame.mixer.music.load(song_info["audio"])
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("BBR")
@@ -29,19 +40,17 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
 
 
-# Game setup
-score = 0
-box_size = 60
-current_target = None
-GAME_START = 0
-GAME_PLAYING = 1
-game_state = GAME_START
+def get_finger(frame, results):
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
+            index_finger = hand_landmarks.landmark[8]
+            cx, cy = int(index_finger.x * WIDTH), int(index_finger.y * HEIGHT)
 
-def get_new_target(width, height):
-    x = random.randint(50, width - box_size - 50)
-    y = random.randint(50, height - box_size - 50)
-    return (x, y)
+            cv2.circle(frame, (cx, cy), 15, (50, 50, 200), cv2.FILLED)
+            return (cx, cy)
+    return None
 
 
 def track_hands(frame, results, target_rect):
@@ -58,55 +67,132 @@ def track_hands(frame, results, target_rect):
                 return True
     return False
 
+def get_beat_map():
+    BPM = song_info["bpm"]
+    MS_PER_BEAT = 60000 / BPM
+    ANIMATION_MS = BPM * 8
+    
+    OFFSET_MS = song_info["offset"]
+
+    x_spots = [150, 250, 350]
+    y_spots = [150, 250]
+    prev_spot = (3, 3)
+
+    beatmap = [] # (spawn_time_ms, x, y)
+    cur_count = 0
+    for eight_count in song_info["eight_counts"]:
+        for beat in eight_count:
+            spawn_time = int(((cur_count + beat) * MS_PER_BEAT) + OFFSET_MS - ANIMATION_MS)
+
+            x_idx = random.randint(0, 2)
+            y_idx = random.randint(0, 1)
+            if prev_spot[0] == x_idx and prev_spot[1] == y_idx:
+                y_idx -= 1
+            tx = x_spots[x_idx]
+            ty = y_spots[y_idx]
+            prev_spot = (x_idx, y_idx)
+
+            beatmap.append((spawn_time, tx, ty))
+        cur_count += 8
+
+    return beatmap
+    
 # Game Loop
 
-while True:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            cap.release()
-            pygame.quit()
-            sys.exit()
+def main():
+    score = 0
+    box_size = 60
+    GAME_START = 0
+    GAME_PLAYING = 1
+    game_state = GAME_START
+    BPM = song_info["bpm"]
+    
+    ANIMATION_MS = BPM * 8
 
-    success, frame = cap.read()
-    if not success: continue
+    beatmap = get_beat_map()
 
-    frame = cv2.flip(frame, 1)
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    active_targets = []
 
-    results = hands.process(rgb_frame)
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                cap.release()
+                pygame.quit()
+                sys.exit()
 
-    hit = False
-    if game_state == GAME_START:
-        start_rect = pygame.Rect(50, 50, 240, 90)
-        hit = track_hands(rgb_frame, results, start_rect)
-        if hit:
-            pygame.mixer.music.play(1)
-            game_state = GAME_PLAYING
-    if game_state == GAME_PLAYING:
-        if current_target is None:
-            current_target = get_new_target(WIDTH, HEIGHT)
+        success, frame = cap.read()
+        if not success: continue
 
-        target_rect = pygame.Rect(current_target[0], current_target[1], box_size, box_size)
-        hit = track_hands(rgb_frame, results, target_rect)
-        if hit:
-            score += 1
-            current_target = get_new_target(WIDTH, HEIGHT)
+        frame = cv2.flip(frame, 1)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # Convert OpenCV array to Pygame Surface
-    pg_bg = pygame.image.frombuffer(rgb_frame.tobytes(), (WIDTH, HEIGHT), 'RGB')
-    screen.blit(pg_bg, (0, 0))
+        results = hands.process(rgb_frame)
 
-    if game_state == GAME_START:
-        pygame.draw.rect(screen, (255, 0, 0), start_rect, 3)
-        text_surf = font.render("Touch Here to Start!", True, (255, 0, 0))
-        screen.blit(text_surf, (start_rect.x + 10, start_rect.y + 30))
-    elif game_state == GAME_PLAYING:
-        pygame.draw.rect(screen, (255, 0, 0), target_rect, 3)
-        text_surf = font.render("TOUCH", True, (255, 0, 0))
-        screen.blit(text_surf, (target_rect.x, target_rect.y - 30))
+        finger_pos = get_finger(rgb_frame, results)
 
-        score_surf = font.render(f"Score: {score}", True, (0, 255, 0))
-        screen.blit(score_surf, (20, 20))
+        # GAME LOGIC
 
-    pygame.display.flip()
-    clock.tick(60)
+        if game_state == GAME_START:
+            start_rect = pygame.Rect(50, 50, 240, 90)
+            if finger_pos and start_rect.collidepoint(finger_pos):
+                game_state = GAME_PLAYING
+                pygame.mixer.music.play()
+
+        if game_state == GAME_PLAYING:
+            current_music_time = pygame.mixer.music.get_pos()
+
+            while beatmap and current_music_time >= beatmap[0][0]:
+                target_time, tx, ty = beatmap.pop(0)
+                active_targets.append({
+                    "spawn_time": target_time,
+                    "rect": pygame.Rect(tx, ty, box_size, box_size)
+                })
+
+            for i in range(len(active_targets) - 1, -1, -1):
+                target = active_targets[i]
+                time_alive = current_music_time - target["spawn_time"]
+                progress = min(time_alive / ANIMATION_MS, 1.0)
+
+                if progress >= 0.8 and finger_pos and target["rect"].collidepoint(finger_pos):
+                    score += 100 * progress
+                    active_targets.pop(i)
+                    continue
+
+                if time_alive > ANIMATION_MS + 100:
+                    active_targets.pop(i)
+
+        # Convert OpenCV array to Pygame Surface
+        pg_bg = pygame.image.frombuffer(rgb_frame.tobytes(), (WIDTH, HEIGHT), 'RGB')
+        screen.blit(pg_bg, (0, 0))
+
+        if game_state == GAME_START:
+            pygame.draw.rect(screen, (255, 0, 0), start_rect, 3)
+            text_surf = font.render("Touch Here to Start!", True, (255, 0, 0))
+            screen.blit(text_surf, (start_rect.x + 10, start_rect.y + 30))
+        elif game_state == GAME_PLAYING:
+            current_music_time = pygame.mixer.music.get_pos()
+
+            for target in active_targets:
+                time_alive = current_music_time - target["spawn_time"]
+                progress = min(time_alive / ANIMATION_MS, 1.0)
+
+                current_size = int(box_size * progress)
+                anim_rect = pygame.Rect(0, 0, current_size, current_size)
+                anim_rect.center = target["rect"].center
+
+                pygame.draw.rect(screen, (100, 100, 100), target["rect"], 1)
+
+                # Draw the expanding box. Turn it green when it enters the hit window.
+                box_color = (0, 255, 0) if progress >= 0.8 else (255, 0, 0)
+                pygame.draw.rect(screen, box_color, anim_rect, 3)
+            
+            score_surf = font.render(f"Score: {(int)(score)}", True, (0, 255, 0))
+            screen.blit(score_surf, (20, 20))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
+
+if __name__ == "__main__":
+    main()

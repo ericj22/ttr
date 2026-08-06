@@ -26,3 +26,23 @@ source .venv/Scripts/activate
 ```bash
 uv pip install -r requirements.txt
 ```
+6. Add an audio file and a beatmap
+7. Run the game:
+```bash
+python bbr.py <beatmap.json>
+```
+
+
+## Beatmap Format
+```json
+{
+    "audio": <audio-file-name>,
+    "offset": <offset froom beginning of audio in ms>,
+    "bpm": <bpm of the audio>,
+    "eight_counts": [ # Array of arrays of eight counts for the song
+        [1, 2, 3, 4],
+        [2, 2.5, 7.5, 8],
+        ...
+    ]
+}
+```
