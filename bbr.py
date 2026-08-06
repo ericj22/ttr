@@ -7,40 +7,9 @@ import pygame
 import json
 import sys
 
-beat_file = sys.argv[1]
-
-if not beat_file:
-    print("Invalid beatmap file")
-    exit()
-
-with open(beat_file, "r") as file:
-    song_info = json.load(file)
-
-# Pygame setup
-pygame.init()
 WIDTH, HEIGHT = 640, 480
-pygame.mixer.init()
-pygame.mixer.music.load(song_info["audio"])
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("BBR")
-clock = pygame.time.Clock()
-font = pygame.font.SysFont("Arial", 24, bold=True)
-
-
-# Setup MediaPipe
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
-mp_draw = mp.solutions.drawing_utils
-
-
-# OpenCV setup
-cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
-
-
-def get_finger(frame, results):
+def get_finger(frame, results, mp_hands, mp_draw):
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
             mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
@@ -53,21 +22,7 @@ def get_finger(frame, results):
     return None
 
 
-def track_hands(frame, results, target_rect):
-    if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
-            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-
-            index_finger = hand_landmarks.landmark[8]
-            cx, cy = int(index_finger.x * WIDTH), int(index_finger.y * HEIGHT)
-
-            cv2.circle(frame, (cx, cy), 15, (50, 50, 200), cv2.FILLED)
-
-            if target_rect.collidepoint(cx, cy):
-                return True
-    return False
-
-def get_beat_map():
+def get_beat_map(song_info):
     BPM = song_info["bpm"]
     MS_PER_BEAT = 60000 / BPM
     ANIMATION_MS = BPM * 8
@@ -88,6 +43,7 @@ def get_beat_map():
             y_idx = random.randint(0, 1)
             if prev_spot[0] == x_idx and prev_spot[1] == y_idx:
                 y_idx -= 1
+                x_idx -= 1
             tx = x_spots[x_idx]
             ty = y_spots[y_idx]
             prev_spot = (x_idx, y_idx)
@@ -99,7 +55,10 @@ def get_beat_map():
     
 # Game Loop
 
-def main():
+def main(beat_file):
+    with open(beat_file, "r") as file:
+        song_info = json.load(file)
+
     score = 0
     box_size = 60
     GAME_START = 0
@@ -109,9 +68,28 @@ def main():
     
     ANIMATION_MS = BPM * 8
 
-    beatmap = get_beat_map()
-
+    beatmap = get_beat_map(song_info)
     active_targets = []
+
+    # Setup MediaPipe
+    mp_hands = mp.solutions.hands
+    hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+    mp_draw = mp.solutions.drawing_utils
+
+    # OpenCV setup
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
+
+    # Pygame init
+    pygame.init()
+    pygame.mixer.init()
+    pygame.mixer.music.load(song_info["audio"])
+
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("BBR")
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont("Arial", 24, bold=True)
 
     while True:
         for event in pygame.event.get():
@@ -128,7 +106,7 @@ def main():
 
         results = hands.process(rgb_frame)
 
-        finger_pos = get_finger(rgb_frame, results)
+        finger_pos = get_finger(rgb_frame, results, mp_hands, mp_draw)
 
         # GAME LOGIC
 
@@ -195,4 +173,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) != 2:
+        print("Invalid arguments")
+        exit()
+    main(sys.argv[1])
